@@ -1,0 +1,7 @@
+File: dir2//corrupt_file2_dir2.txt
+Size: 268 bytes
+Last modified time: Sat May 11 15:02:16 2024
+Path: dir2//corrupt_file2_dir2.txt
+st_mode: 33279
+
+

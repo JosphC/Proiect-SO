@@ -1,0 +1,7 @@
+File: dir2//corrput_file1_dir2.txt
+Size: 153 bytes
+Last modified time: Sat May 11 13:52:26 2024
+Path: dir2//corrput_file1_dir2.txt
+st_mode: 33133
+
+

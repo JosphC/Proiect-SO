@@ -1,0 +1,7 @@
+File: dir3//subdir1_dir3
+Size: 4096 bytes
+Last modified time: Sat Apr 20 15:55:37 2024
+Path: dir3//subdir1_dir3
+st_mode: 16895
+
+

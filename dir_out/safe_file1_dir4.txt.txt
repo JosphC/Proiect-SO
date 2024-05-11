@@ -1,0 +1,7 @@
+File: dir4//safe_file1_dir4.txt
+Size: 211 bytes
+Last modified time: Sat May 11 11:08:22 2024
+Path: dir4//safe_file1_dir4.txt
+st_mode: 33279
+
+
