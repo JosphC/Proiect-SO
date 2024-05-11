@@ -11,14 +11,14 @@
 #include <time.h>
 #include <fcntl.h>
 
-#define MAX_PATH_LENGTH 1024
+#define PATH_LENGTH 1024
 
 typedef struct
 {
-    char name[MAX_PATH_LENGTH];
+    char name[PATH_LENGTH];
+    time_t mod_time;
     mode_t mode;
     off_t size;
-    time_t mtime;
 } FileMetadata;
 
 // Function to update a snapshot file with file metadata
@@ -36,7 +36,7 @@ void update_snapshot_file(const char *snapshot_path, const char *path, const Fil
         // Check if metadata has changed since the last snapshot
         if (metadata->mode != snapshot_metadata.mode ||
             metadata->size != snapshot_metadata.size ||
-            metadata->mtime != snapshot_metadata.mtime)
+            metadata->mod_time != snapshot_metadata.mod_time)
         {
             // Write metadata to the snapshot file
             snapshot_file = open(snapshot_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -45,7 +45,7 @@ void update_snapshot_file(const char *snapshot_path, const char *path, const Fil
 
                 dprintf(snapshot_file, "File: %s\n", metadata->name);
                 dprintf(snapshot_file, "Size: %ld bytes\n", (long)metadata->size);
-                dprintf(snapshot_file, "Last modified time: %s", ctime(&metadata->mtime));
+                dprintf(snapshot_file, "Last modified time: %s", ctime(&metadata->mod_time));
                 dprintf(snapshot_file, "Path: %s\n", path);
                 dprintf(snapshot_file, "st_mode: %d\n\n\n", metadata->mode);
                 close(snapshot_file);
@@ -80,10 +80,10 @@ void file_metadata(const char *path, FileMetadata *metadata)
         exit(EXIT_FAILURE);
     }
 
-    strncpy(metadata->name, path, MAX_PATH_LENGTH);
+    strncpy(metadata->name, path, PATH_LENGTH);
     metadata->mode = file_stat.st_mode;
     metadata->size = file_stat.st_size;
-    metadata->mtime = file_stat.st_mtime;
+    metadata->mod_time = file_stat.st_mtime;
 }
 
 // Function to monitor a directory for potentially malicious files, update snapshots, and count corrupt files
@@ -109,7 +109,7 @@ void monitor_check_directory(const char *dir_path, const char *output_dir, const
         }
 
         // Construct the full path of the current file or directory
-        char path[MAX_PATH_LENGTH];
+        char path[PATH_LENGTH];
         snprintf(path, sizeof(path), "%s/%s", dir_path, entry->d_name);
 
         FileMetadata metadata;
@@ -119,9 +119,9 @@ void monitor_check_directory(const char *dir_path, const char *output_dir, const
         // Check if file permissions are unsafe (not fully restricted)
         if ((metadata.mode & (S_IRWXU | S_IRWXG | S_IRWXO)) != (S_IRWXU | S_IRWXG | S_IRWXO))
         {
-            int pipe_fd[2];
+            int pfd[2];
             // Create a pipe for communication with the child process
-            if (pipe(pipe_fd) == -1)
+            if (pipe(pfd) == -1)
             {
                 perror("Error creating pipe");
                 exit(EXIT_FAILURE);
@@ -136,7 +136,7 @@ void monitor_check_directory(const char *dir_path, const char *output_dir, const
             }
             else if (child_pid == 0)
             {
-                close(pipe_fd[0]); // Close reading end of the pipe in the child process
+                close(pfd[0]); // Close reading end of the pipe in the child process
 
                 // Execute the malware verification script
                 execlp("./verify_for_malicious.sh", "verify_for_malicious.sh", path, isolated_dir, "corrupted", "dangerous", "risk", "attack", "malware", "malicious", NULL);
@@ -145,13 +145,13 @@ void monitor_check_directory(const char *dir_path, const char *output_dir, const
             }
             else
             {
-                close(pipe_fd[1]); // Close writing end of the pipe in the parent process
+                close(pfd[1]); // Close writing end of the pipe in the parent process
 
                 char buffer[20]; // Buffer for reading from the pipe
                 ssize_t bytes_read;
 
                 // Read from the pipe
-                bytes_read = read(pipe_fd[0], buffer, sizeof(buffer) - 1);
+                bytes_read = read(pfd[0], buffer, sizeof(buffer) - 1);
                 if (bytes_read == -1)
                 {
                     perror("Error reading from pipe");
@@ -159,7 +159,7 @@ void monitor_check_directory(const char *dir_path, const char *output_dir, const
                 }
 
                 buffer[bytes_read] = '\0';
-                close(pipe_fd[0]);
+                close(pfd[0]);
 
                 // Check the result of the malware verification
                 if (strcmp(buffer, "SAFE") == 0)
@@ -175,7 +175,7 @@ void monitor_check_directory(const char *dir_path, const char *output_dir, const
         }
 
         // Update the snapshot file with metadata for the current file
-        char snapshot_path[MAX_PATH_LENGTH];
+        char snapshot_path[PATH_LENGTH];
         snprintf(snapshot_path, sizeof(snapshot_path), "%s/%s.txt", output_dir, entry->d_name);
         update_snapshot_file(snapshot_path, path, &metadata);
         printf("Snapshot for Directory %s updated successfully.\n", dir_path);
@@ -284,7 +284,7 @@ int main(int argc, char *argv[])
     }
 
     // Print the total number of potentially malicious files found
-    printf("Total number of potentially malicious files found: %d\n", total_corrupt);
+    printf("Number of potentially malicious files found: %d\n", total_corrupt);
 
     // Wait for any remaining child processes to terminate
     while (wait(NULL) > 0)
