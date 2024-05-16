@@ -21,16 +21,70 @@ typedef struct
     off_t size;
 } FileMetadata;
 
+// void update_snapshot_file(const char *snapshot_path, const char *path, const FileMetadata *metadata)
+// {
+//     // Open the snapshot file for writing or create it if it doesn't exist
+//     int snapshot_file = open(snapshot_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+//     if (snapshot_file != -1)
+//     {
+//         FileMetadata snapshot_metadata;
+//         // Read existing metadata from the snapshot file
+//         read(snapshot_file, &snapshot_metadata, sizeof(FileMetadata));
+//         close(snapshot_file);
+
+//         // Check if metadata has changed since the last snapshot
+//         if (metadata->mode != snapshot_metadata.mode ||
+//             metadata->size != snapshot_metadata.size ||
+//             metadata->mod_time != snapshot_metadata.mod_time)
+//         {
+//             // Write metadata to the snapshot file
+//             snapshot_file = open(snapshot_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+//             if (snapshot_file != -1)
+//             {
+
+//                 dprintf(snapshot_file, "File: %s\n", metadata->name);
+//                 dprintf(snapshot_file, "Size: %ld bytes\n", (long)metadata->size);
+//                 dprintf(snapshot_file, "Last modified time: %s", ctime(&metadata->mod_time));
+//                 dprintf(snapshot_file, "Path: %s\n", path);
+//                 dprintf(snapshot_file, "st_mode: %d\n\n\n", metadata->mode);
+//                 close(snapshot_file);
+//                 // printf("Modifications detected in file: %s\n", path);
+//             }
+//             else
+//             {
+//                 perror("Error updating snapshot file");
+//             }
+//         }
+//     }
+//     else
+//     {
+//         // If the snapshot file doesn't exist, create it and write metadata
+//         int snapshot_file = open(snapshot_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+//         if (snapshot_file != -1)
+//         {
+//             // Write metadata to the snapshot file
+//             write(snapshot_file, metadata, sizeof(FileMetadata));
+//             close(snapshot_file);
+//         }
+//     }
+// }
+
 // Function to update a snapshot file with file metadata
 void update_snapshot_file(const char *snapshot_path, const char *path, const FileMetadata *metadata)
 {
-    // Open the snapshot file for writing or create it if it doesn't exist
-    int snapshot_file = open(snapshot_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    // Open the snapshot file
+    int snapshot_file = open(snapshot_path, O_RDONLY);
     if (snapshot_file != -1)
     {
         FileMetadata snapshot_metadata;
         // Read existing metadata from the snapshot file
-        read(snapshot_file, &snapshot_metadata, sizeof(FileMetadata));
+        ssize_t bytes_read = read(snapshot_file, &snapshot_metadata, sizeof(FileMetadata));
+        if (bytes_read == -1)
+        {
+            perror("Error reading snapshot file");
+            close(snapshot_file);
+            exit(EXIT_FAILURE);
+        }
         close(snapshot_file);
 
         // Check if metadata has changed since the last snapshot
@@ -38,22 +92,26 @@ void update_snapshot_file(const char *snapshot_path, const char *path, const Fil
             metadata->size != snapshot_metadata.size ||
             metadata->mod_time != snapshot_metadata.mod_time)
         {
-            // Write metadata to the snapshot file
+            printf("Modifications detected in file: %s\n", path);
+            remove(snapshot_path);
             snapshot_file = open(snapshot_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+
             if (snapshot_file != -1)
             {
+                ssize_t bytes_written = write(snapshot_file, metadata, sizeof(FileMetadata));
+                if (bytes_written == -1)
+                {
 
-                dprintf(snapshot_file, "File: %s\n", metadata->name);
-                dprintf(snapshot_file, "Size: %ld bytes\n", (long)metadata->size);
-                dprintf(snapshot_file, "Last modified time: %s", ctime(&metadata->mod_time));
-                dprintf(snapshot_file, "Path: %s\n", path);
-                dprintf(snapshot_file, "st_mode: %d\n\n\n", metadata->mode);
+                    perror("Error writing snapshot file");
+                    close(snapshot_file);
+                    exit(EXIT_FAILURE);
+                }
                 close(snapshot_file);
-                // printf("Modifications detected in file: %s\n", path);
             }
             else
             {
-                perror("Error updating snapshot file");
+                perror("Error creating snapshot file");
+                exit(EXIT_FAILURE);
             }
         }
     }
@@ -116,6 +174,11 @@ void monitor_check_directory(const char *dir_path, const char *output_dir, const
         // Get metadata for the current file or directory
         file_metadata(path, &metadata);
 
+        // printf("Snapshot for Directory %s updated successfully.\n", dir_path);
+        char snapshot_path[PATH_LENGTH];
+        snprintf(snapshot_path, sizeof(snapshot_path), "%s/%s", output_dir, entry->d_name);
+        update_snapshot_file(snapshot_path, path, &metadata);
+
         // Check if file permissions are unsafe (not fully restricted)
         if ((metadata.mode & (S_IRWXU | S_IRWXG | S_IRWXO)) != (S_IRWXU | S_IRWXG | S_IRWXO))
         {
@@ -137,6 +200,12 @@ void monitor_check_directory(const char *dir_path, const char *output_dir, const
             else if (child_pid == 0)
             {
                 close(pfd[0]); // Close reading end of the pipe in the child process
+
+                if (dup2(pfd[1], STDOUT_FILENO) == -1)
+                {
+                    perror("Error redirecting stdout to pipe");
+                    exit(EXIT_FAILURE);
+                }
 
                 // Execute the malware verification script
                 execlp("./verify_for_malicious.sh", "verify_for_malicious.sh", path, isolated_dir, "corrupted", "dangerous", "risk", "attack", "malware", "malicious", NULL);
@@ -173,17 +242,7 @@ void monitor_check_directory(const char *dir_path, const char *output_dir, const
                 }
             }
         }
-
-        // Update the snapshot file with metadata for the current file
-        char snapshot_path[PATH_LENGTH];
-        snprintf(snapshot_path, sizeof(snapshot_path), "%s/%s.txt", output_dir, entry->d_name);
-        update_snapshot_file(snapshot_path, path, &metadata);
-        printf("Snapshot for Directory %s updated successfully.\n", dir_path);
     }
-
-    // Wait for all child processes to terminate
-    while (wait(NULL) > 0)
-        ;
 
     closedir(dir); // Close the directory
 }
@@ -285,10 +344,6 @@ int main(int argc, char *argv[])
 
     // Print the total number of potentially malicious files found
     printf("Number of potentially malicious files found: %d\n", total_corrupt);
-
-    // Wait for any remaining child processes to terminate
-    while (wait(NULL) > 0)
-        ;
 
     return 0;
 }
